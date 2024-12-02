@@ -333,9 +333,49 @@ bot.on('callback_query', async (callbackQuery) => {
           }
         );
         break;
+
+      case 'select_interval':
+        await bot.editMessageText(
+          '⏱ 비교 간격을 선택해주세요:', 
+          {
+            chat_id: chatId,
+            message_id: messageId,
+            ...createIntervalMenu()
+          }
+        );
+        break;
+
+      case 'back_to_settings':
+        const currentSettings = chatSettings.get(chatId) || {...defaultSettings};
+        await bot.editMessageText(
+          '⚙️ 설정 메뉴입니다:', 
+          {
+            chat_id: chatId,
+            message_id: messageId,
+            ...createSettingsMenu(currentSettings)
+          }
+        );
+        break;
     }
 
-    // 콜백 쿼리에 응답
+    // 시간 간격 선택 처리
+    if (action.startsWith('interval_')) {
+      const interval = action.replace('interval_', '');
+      const settings = chatSettings.get(chatId) || {...defaultSettings};
+      settings.compareInterval = COMPARE_INTERVALS[interval];
+      chatSettings.set(chatId, settings);
+      await saveChatSettings(chatId, settings);
+
+      await bot.editMessageText(
+        '⚙️ 설정 메뉴입니다:', 
+        {
+          chat_id: chatId,
+          message_id: messageId,
+          ...createSettingsMenu(settings)
+        }
+      );
+    }
+
     await bot.answerCallbackQuery(callbackQuery.id);
     
   } catch (error) {
