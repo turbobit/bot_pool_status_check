@@ -7,7 +7,13 @@ TelegramBot.Promise = Promise;
 const token = process.env.TELEGRAM_BOT_TOKEN;
 const bot = new TelegramBot(token, { 
   polling: true,
-  cancelAfter: 0
+  cancelAfter: 10000,
+  request: {
+    agentOptions: {
+      keepAlive: true,
+      family: 4  // IPv4 강제 사용
+    }
+  }
 });
 
 const CHECK_INTERVAL = 60 * 1000;
