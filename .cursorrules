@@ -1,0 +1,17 @@
+# 프로그램 목적
+ - 텔레그램 봇
+ - nodejs 기반 프로젝트
+ - 텔레그램 봇 프로젝트 템플릿 제공
+ - pool 의 상태를 주기적으로 체크
+ - 풀들의 상태를 텔레그램 봇으로 전송
+ - 최근 블럭 높이를 체크하여 높이가 낮은 풀이 있으면 텔레그램 봇으로 전송( 10블럭 차이 이상 )
+ - 풀들의 블럭 상태를 체크하여 블럭 상태를 텔레그램 봇으로 전송
+ - 풀 상태는 1분에 한번씩 체크하여
+
+# 풀 대상 api endpoint
+- https://www.mintme.com/pool/api/stats
+- https://web-test.gonspool.com/api/stats
+
+# 분석할 api 형식
+- {"candidatesTotal":34,"hashrate":172814,"immatureTotal":11,"maturedTotal":3519489,"minersTotal":50,"nodes":[{"difficulty":"3606235","height":"8489084","lastBeat":"1733098668","name":"main"}],"now":1733098669814,"stats":{"lastBlockFound":1733098632,"roundShares":5700000}}
+- {"candidatesTotal":12,"hashrate":49915,"immatureTotal":15,"maturedTotal":17880,"minersTotal":14,"nodes":[{"difficulty":"3606235","height":"8489084","lastBeat":"1733098681","name":"main"}],"now":1733098682710,"stats":{"lastBlockFound":1733098606,"roundShares":3652823}}

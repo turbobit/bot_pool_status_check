@@ -1,0 +1,19 @@
+{
+  "name": "mintme_pool_monitor_bot",
+  "version": "1.0.0",
+  "description": "A Telegram bot for monitoring MintMe pool status",
+  "main": "index.js",
+  "scripts": {
+    "start": "node index.js",
+    "dev": "nodemon index.js"
+  },
+  "dependencies": {
+    "axios": "^0.21.1",
+    "dotenv": "^10.0.0",
+    "node-telegram-bot-api": "^0.54.0",
+    "sqlite3": "^5.1.7"
+  },
+  "devDependencies": {
+    "nodemon": "^2.0.15"
+  }
+}
