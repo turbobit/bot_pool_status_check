@@ -22,6 +22,8 @@ const db = new sqlite3.Database('./pool_stats.db', (err) => {
     console.error('데이터베이스 연결 오류:', err);
   } else {
     console.log('SQLite 데이터베이스에 연결되었습니다.');
+    
+    // 풀 상태 테이블 생성
     db.run(`CREATE TABLE IF NOT EXISTS pool_stats (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       name TEXT,
@@ -30,6 +32,17 @@ const db = new sqlite3.Database('./pool_stats.db', (err) => {
       miners INTEGER,
       timestamp DATETIME DEFAULT CURRENT_TIMESTAMP
     )`);
+
+    // 채팅방 설정 테이블 생성
+    db.run(`CREATE TABLE IF NOT EXISTS chat_settings (
+      chat_id INTEGER PRIMARY KEY,
+      auto_compare BOOLEAN DEFAULT 0,
+      compare_interval INTEGER DEFAULT ${COMPARE_INTERVALS['5분']},
+      last_auto_compare INTEGER DEFAULT 0
+    )`);
+
+    // 저장된 설정 로드
+    loadChatSettings();
   }
 });
 
@@ -44,13 +57,14 @@ const poolEndpoints = poolUrls.map((url, index) => ({
 
 // 봇 명령어 메뉴 설정
 bot.setMyCommands([
-  { command: '/start', description: '모니터링 시작' },
-  { command: '/stop', description: '모니터링 중지' },
-  { command: '/monitor', description: '모니터링 상태 확인' },
+  { command: '/start', description: '풀 블럭 차이 긴급 알리미 시작' },
+  { command: '/stop', description: '풀 블럭 차이 긴급 알리미 중지' },
+  { command: '/monitor', description: '풀 블럭 차이 긴급 알리미 상태 확인' },
   { command: '/line', description: '──────────────' },
   { command: '/status', description: '현재 풀 상태 확인' },
   { command: '/compare', description: '풀 높이 비교' },
-  { command: '/history', description: '풀 상태 기록 보기' }
+  { command: '/history', description: '풀 상태 기록 보기' },
+  { command: '/settings', description: '설정 메뉴' }
 ]);
 
 // 해시레이트 포맷팅 함수 추가
@@ -163,7 +177,7 @@ async function checkPoolStatus() {
   }
 }
 
-// 버튼 메뉴 생성 함수
+// 버튼 메뉴 생성 함수 수정
 function createMainMenu() {
   return {
     reply_markup: {
@@ -185,6 +199,155 @@ function createMainMenu() {
   };
 }
 
+// 시간 간격 옵션 (밀리초 단위)
+const COMPARE_INTERVALS = {
+  '10초': 10 * 1000,
+  '1분': 60 * 1000,
+  '5분': 5 * 60 * 1000,
+  '30분': 30 * 60 * 1000,
+  '1시간': 60 * 60 * 1000,
+  '3시간': 3 * 60 * 60 * 1000,
+  '6시간': 6 * 60 * 60 * 1000,
+  '12시간': 12 * 60 * 60 * 1000,
+  '24시간': 24 * 60 * 60 * 1000
+};
+
+// 채팅방 설정 기본값 수정
+const defaultSettings = {
+  autoCompare: false,
+  lastAutoCompare: 0,
+  compareInterval: COMPARE_INTERVALS['5분']
+};
+
+// 설정 메뉴 생성 함수 수정
+function createSettingsMenu(settings) {
+  const currentIntervalName = Object.entries(COMPARE_INTERVALS)
+    .find(([_, value]) => value === settings.compareInterval)?.[0] || '5분';
+
+  return {
+    reply_markup: {
+      inline_keyboard: [
+        [
+          { 
+            text: `🔄 자동 비교 알리미: ${settings.autoCompare ? '켜짐' : '꺼짐'}`, 
+            callback_data: 'toggle_auto_compare' 
+          }
+        ],
+        [
+          { 
+            text: `⏱ 비교 간격: ${currentIntervalName}`, 
+            callback_data: 'select_interval' 
+          }
+        ],
+        [
+          { text: '◀️ 메인 메뉴로 돌아가기', callback_data: 'main_menu' }
+        ]
+      ]
+    }
+  };
+}
+
+// 시간 간격 선택 메뉴 생성 함수
+function createIntervalMenu() {
+  const keyboard = Object.keys(COMPARE_INTERVALS).map(interval => ([
+    { text: interval, callback_data: `interval_${interval}` }
+  ]));
+  
+  keyboard.push([
+    { text: '◀️ 설정으로 돌아가기', callback_data: 'back_to_settings' }
+  ]);
+
+  return {
+    reply_markup: {
+      inline_keyboard: keyboard
+    }
+  };
+}
+
+// 콜백 쿼리 핸들러 수정
+bot.on('callback_query', async (callbackQuery) => {
+  const chatId = callbackQuery.message.chat.id;
+  const messageId = callbackQuery.message.message_id;
+  const action = callbackQuery.data;
+
+  try {
+    switch (action) {
+      case 'status':
+        const poolStats = await getPoolStats();
+        const statusMessage = createStatusMessage(poolStats);
+        await bot.sendMessage(chatId, `📊 현재 풀 상태:\n\n${statusMessage}`);
+        break;
+
+      case 'compare':
+        const compareStats = await getPoolStats();
+        const compareMessage = createHeightCompareMessage(compareStats);
+        await bot.sendMessage(chatId, compareMessage);
+        break;
+
+      case 'start':
+        if (!activeChatIds.includes(chatId)) {
+          activeChatIds.push(chatId);
+          await bot.sendMessage(chatId, '✅ 풀 블럭 차이 긴급 알리미를 시작합니다.');
+        } else {
+          await bot.sendMessage(chatId, '❗ 이미 풀 블럭 차이 긴급 알리미가 활성화되어 있습니다.');
+        }
+        break;
+
+      case 'stop':
+        const index = activeChatIds.indexOf(chatId);
+        if (index !== -1) {
+          activeChatIds.splice(index, 1);
+          await bot.sendMessage(chatId, '⏹ 풀 블럭 차이 긴급 알리미를 중지했습니다.');
+        } else {
+          await bot.sendMessage(chatId, '❌ 풀 블럭 차이 긴급 알리미가 비활성화 상태입니다.');
+        }
+        break;
+
+      case 'monitor':
+        if (!activeChatIds.includes(chatId)) {
+          await bot.sendMessage(chatId, '📴 풀 블럭 차이 긴급 알리미가 비활성화 상태입니다.');
+          return;
+        }
+        const monitorMessage = 
+          '📊 모니터링 상태\n\n' +
+          `✅ 상태: 활성화\n` +
+          `🔄 체크 주기: ${CHECK_INTERVAL / 1000}초\n` +
+          `⚠️ 블록 차이 임계값: ${BLOCK_HEIGHT_THRESHOLD}블록\n` +
+          `👤 모니터링 채팅 ID: ${chatId}`;
+        await bot.sendMessage(chatId, monitorMessage);
+        break;
+
+      case 'history':
+        const poolHistory = await getPoolHistory();
+        const historyMessage = createHistoryMessage(poolHistory);
+        await bot.sendMessage(chatId, historyMessage);
+        break;
+
+      case 'main_menu':
+        await bot.editMessageText(
+          '🔷 원하시는 작업을 선택해주세요:', 
+          {
+            chat_id: chatId,
+            message_id: messageId,
+            ...createMainMenu()
+          }
+        );
+        break;
+    }
+
+    // 콜백 쿼리에 응답
+    await bot.answerCallbackQuery(callbackQuery.id);
+    
+  } catch (error) {
+    console.error('콜백 쿼리 처리 중 오류:', error);
+    await bot.sendMessage(chatId, '❌ 요청 처리 중 오류가 발생했습니다.');
+    await bot.answerCallbackQuery(callbackQuery.id, {
+      text: '오류가 발생했습니다.',
+      show_alert: true
+    });
+  }
+});
+
 // 메인 메뉴 표시 명령어 추가
 bot.onText(/\/menu/, async (msg) => {
   const chatId = msg.chat.id;
@@ -200,9 +363,9 @@ bot.onText(/\/start/, async (msg) => {
   const chatId = msg.chat.id;
   if (!activeChatIds.includes(chatId)) {
     activeChatIds.push(chatId);
-    await bot.sendMessage(chatId, '✅ 풀 상태 모니터링을 시작합니다.');
+    await bot.sendMessage(chatId, '✅ 풀 블럭 차이 긴급 알리미를 시작합니다.');
   } else {
-    await bot.sendMessage(chatId, '❗ 이미 모니터링이 활성화되어 있습니다.');
+    await bot.sendMessage(chatId, '❗ 이미 풀 블럭 차이 긴급 알리미가 활성화되어 있습니다.');
   }
 });
 
@@ -211,16 +374,16 @@ bot.onText(/\/stop/, async (msg) => {
   const index = activeChatIds.indexOf(chatId);
   if (index !== -1) {
     activeChatIds.splice(index, 1);
-    await bot.sendMessage(chatId, '⏹ 풀 상태 모니터링을 중지했습니다.');
+    await bot.sendMessage(chatId, '⏹ 풀 블럭 차이 긴급 알리미를 중지했습니다.');
   } else {
-    await bot.sendMessage(chatId, '❌ 모니터링이 활성화되어 있지 않습니다.');
+    await bot.sendMessage(chatId, '❌ 풀 블럭 차이 긴급 알리미가 비활성화 상태입니다.');
   }
 });
 
 bot.onText(/\/monitor/, async (msg) => {
   const chatId = msg.chat.id;
   if (!activeChatIds.includes(chatId)) {
-    await bot.sendMessage(chatId, '📴 현재 모니터링이 비활성화 상태입니다.');
+    await bot.sendMessage(chatId, '📴 풀 블럭 차이 긴급 알리미가 비활성화 상태입니다.');
     return;
   }
   const monitorMessage = 
@@ -337,8 +500,136 @@ bot.onText(/\/history/, async (msg) => {
   }
 });
 
-// 주기적 체크 시작
-setInterval(checkPoolStatus, CHECK_INTERVAL);
+// 주팅방별 설정을 저장할 객체
+const chatSettings = new Map();
+
+// 설정 저장 함수
+async function saveChatSettings(chatId, settings) {
+  return new Promise((resolve, reject) => {
+    const query = `
+      INSERT OR REPLACE INTO chat_settings 
+      (chat_id, auto_compare, compare_interval, last_auto_compare)
+      VALUES (?, ?, ?, ?)
+    `;
+    
+    db.run(query, [
+      chatId,
+      settings.autoCompare ? 1 : 0,
+      settings.compareInterval,
+      settings.lastAutoCompare
+    ], (err) => {
+      if (err) {
+        console.error('설정 저장 중 오류:', err);
+        reject(err);
+      } else {
+        resolve();
+      }
+    });
+  });
+}
+
+// 저장된 설정 로드 함수
+function loadChatSettings() {
+  const query = 'SELECT * FROM chat_settings';
+  
+  db.all(query, [], (err, rows) => {
+    if (err) {
+      console.error('설정 로드 중 오류:', err);
+      return;
+    }
+
+    rows.forEach(row => {
+      chatSettings.set(row.chat_id, {
+        autoCompare: row.auto_compare === 1,
+        compareInterval: row.compare_interval,
+        lastAutoCompare: row.last_auto_compare
+      });
+    });
+    
+    console.log(`${rows.length}개의 채팅방 설정을 로드했습니다.`);
+  });
+}
+
+// 최근 풀 상태 조회 함수 추가
+function getLatestPoolStats() {
+  return new Promise((resolve, reject) => {
+    const query = `
+      WITH RankedPools AS (
+        SELECT 
+          name,
+          height,
+          hashrate,
+          miners,
+          datetime(timestamp, 'localtime') as timestamp,
+          ROW_NUMBER() OVER (PARTITION BY name ORDER BY timestamp DESC) as rn
+        FROM pool_stats
+        WHERE timestamp >= datetime('now', '-1 hour')
+      )
+      SELECT 
+        name,
+        height,
+        hashrate,
+        miners,
+        timestamp
+      FROM RankedPools
+      WHERE rn = 1
+      ORDER BY timestamp DESC
+    `;
+    
+    db.all(query, [], (err, rows) => {
+      if (err) {
+        reject(err);
+        return;
+      }
+      
+      const poolStats = rows.map(row => ({
+        name: row.name,
+        height: row.height,
+        hashrate: row.hashrate,
+        miners: row.miners,
+        lastBlockFound: Math.floor(new Date(row.timestamp).getTime() / 1000)
+      }));
+      
+      resolve(poolStats);
+    });
+  });
+}
+
+// 풀 상태 체크용 인터벌 (1분)
+setInterval(async () => {
+  await checkPoolStatus();
+}, CHECK_INTERVAL);
+
+// 자동 비교용 인터벌
+setInterval(async () => {
+  const now = Date.now();
+  
+  for (const [chatId, settings] of chatSettings.entries()) {
+    if (!settings.autoCompare) continue;
+    
+    // 각 채팅방의 마지막 비교 시간과 설정된 간격을 확인
+    if (now - settings.lastAutoCompare >= settings.compareInterval) {
+      try {
+        const compareStats = await getLatestPoolStats();
+        const compareMessage = createHeightCompareMessage(compareStats);
+        const intervalName = Object.entries(COMPARE_INTERVALS)
+          .find(([_, value]) => value === settings.compareInterval)?.[0];
+        
+        await bot.sendMessage(
+          chatId, 
+          `🔄 자동 비교 결과 (${intervalName} 간격):\n\n${compareMessage}`
+        );
+        
+        // 마지막 비교 시간 업데이트
+        settings.lastAutoCompare = now;
+        chatSettings.set(chatId, settings);
+        await saveChatSettings(chatId, settings);
+      } catch (error) {
+        console.error(`채팅방 ${chatId}의 자동 비교 중 오류:`, error);
+      }
+    }
+  }
+}, 10000); // 10초마다 체크
 
 // 에러 핸들링
 bot.on('error', (error) => {
@@ -346,3 +637,15 @@ bot.on('error', (error) => {
 });
 
 console.log('텔레그램 봇이 시작되었습니다.');
+
+// settings 명령어 핸들러 추가
+bot.onText(/\/settings/, async (msg) => {
+  const chatId = msg.chat.id;
+  const settings = chatSettings.get(chatId) || {...defaultSettings};
+  
+  await bot.sendMessage(
+    chatId,
+    '⚙️ 설정 메뉴입니다:',
+    createSettingsMenu(settings)
+  );
+});
