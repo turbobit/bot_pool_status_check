@@ -279,13 +279,13 @@ bot.on('callback_query', async (callbackQuery) => {
   try {
     switch (action) {
       case 'status':
-        const poolStats = await getPoolStats();
+        const poolStats = await getLatestPoolStats();
         const statusMessage = createStatusMessage(poolStats);
         await bot.sendMessage(chatId, `📊 현재 풀 상태:\n\n${statusMessage}`);
         break;
 
       case 'compare':
-        const compareStats = await getPoolStats();
+        const compareStats = await getLatestPoolStats();
         const compareMessage = createHeightCompareMessage(compareStats);
         await bot.sendMessage(chatId, compareMessage);
         break;
@@ -444,7 +444,7 @@ bot.onText(/\/monitor/, async (msg) => {
 bot.onText(/\/status/, async (msg) => {
   const chatId = msg.chat.id;
   try {
-    const poolStats = await getPoolStats();
+    const poolStats = await getLatestPoolStats();
     const statusMessage = createStatusMessage(poolStats);
     await bot.sendMessage(chatId, `📊 현재 풀 상태:\n\n${statusMessage}`);
   } catch (error) {
@@ -456,7 +456,7 @@ bot.onText(/\/status/, async (msg) => {
 bot.onText(/\/compare/, async (msg) => {
   const chatId = msg.chat.id;
   try {
-    const compareStats = await getPoolStats();
+    const compareStats = await getLatestPoolStats();
     const compareMessage = createHeightCompareMessage(compareStats);
     await bot.sendMessage(chatId, compareMessage);
   } catch (error) {
