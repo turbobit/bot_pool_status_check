@@ -47,6 +47,16 @@ const db = new sqlite3.Database('./pool_stats.db', (err) => {
       last_auto_compare INTEGER DEFAULT 0
     )`);
 
+    // 페이아웃 정보 테이블 추가
+    db.run(`CREATE TABLE IF NOT EXISTS pool_payments (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      pool_name TEXT,
+      last_payment_timestamp INTEGER,
+      last_payment_tx TEXT,
+      last_payment_amount INTEGER,
+      timestamp DATETIME DEFAULT CURRENT_TIMESTAMP
+    )`);
+
     // 저장된 설정 로드
     loadChatSettings();
   }
@@ -66,10 +76,11 @@ bot.setMyCommands([
   { command: '/start', description: '풀 블럭 차이 긴급 알리미 시작' },
   { command: '/stop', description: '풀 블럭 차이 긴급 알리미 중지' },
   { command: '/monitor', description: '풀 블럭 차이 긴급 알리미 상태 확인' },
-  { command: '/line', description: '──────────────' },
+  { command: '/line', description: '─' },
   { command: '/status', description: '현재 풀 상태 확인' },
   { command: '/compare', description: '풀 높이 비교' },
   { command: '/history', description: '풀 상태 기록 보기' },
+  { command: '/payments', description: '최종 페이아웃 시간 체크' },
   { command: '/settings', description: '설정 메뉴' }
 ]);
 
@@ -163,6 +174,15 @@ async function checkPoolStatus() {
   try {
     const poolStats = await getPoolStats();
     savePoolStats(poolStats); // 풀 상태 저장
+
+    // 페이아웃 정보 조회 및 저장
+    for (const endpoint of poolEndpoints) {
+      const paymentInfo = await getPoolPayments(endpoint.url, endpoint.name);
+      if (paymentInfo) {
+        await savePoolPayment(paymentInfo);
+      }
+    }
+
     const heights = poolStats.map(pool => pool.height);
     const maxHeight = Math.max(...heights);
     const minHeight = Math.min(...heights);
@@ -199,13 +219,16 @@ function createMainMenu() {
         [
           { text: '📡 모니터링 상태', callback_data: 'monitor' },
           { text: '📜 풀 상태 기록', callback_data: 'history' }
+        ],
+        [
+          { text: '💰 최종 페이아웃', callback_data: 'payments' }
         ]
       ]
     }
   };
 }
 
-// 시간 간격 옵션 (밀리초 단위)
+// 시간 간격 옵션 (밀초 단위)
 const COMPARE_INTERVALS = {
   '10초': 10 * 1000,
   '1분': 60 * 1000,
@@ -361,6 +384,12 @@ bot.on('callback_query', async (callbackQuery) => {
             ...createSettingsMenu(currentSettings)
           }
         );
+        break;
+
+      case 'payments':
+        const payments = await getLatestPayments();
+        const paymentMessage = createPaymentMessage(payments);
+        await bot.sendMessage(chatId, paymentMessage);
         break;
     }
 
@@ -694,4 +723,122 @@ bot.onText(/\/settings/, async (msg) => {
     '⚙️ 설정 메뉴입니다:',
     createSettingsMenu(settings)
   );
+});
+
+// 페이아웃 정보 조회 함수
+async function getPoolPayments(poolEndpoint, poolName) {
+  try {
+    const paymentsUrl = poolEndpoint.replace('/api/stats', '/api/payments');
+    const response = await axios.get(paymentsUrl);
+    const payments = response.data.payments;
+    
+    if (payments && payments.length > 0) {
+      const lastPayment = payments[0];
+      return {
+        poolName,
+        timestamp: lastPayment.timestamp,
+        tx: lastPayment.tx,
+        amount: lastPayment.amount
+      };
+    }
+    return null;
+  } catch (error) {
+    console.error(`${poolName} 페이아웃 정보 조회 중 오류:`, error);
+    return null;
+  }
+}
+
+// 페이아웃 정보 저장 함수
+function savePoolPayment(payment) {
+  return new Promise((resolve, reject) => {
+    const query = `
+      INSERT INTO pool_payments 
+      (pool_name, last_payment_timestamp, last_payment_tx, last_payment_amount)
+      VALUES (?, ?, ?, ?)
+    `;
+    
+    db.run(query, [
+      payment.poolName,
+      payment.timestamp,
+      payment.tx,
+      payment.amount
+    ], (err) => {
+      if (err) reject(err);
+      else resolve();
+    });
+  });
+}
+
+// 최근 페이아웃 정보 조회 함수
+async function getLatestPayments() {
+  return new Promise((resolve, reject) => {
+    const query = `
+      WITH RankedPayments AS (
+        SELECT 
+          pool_name,
+          last_payment_timestamp,
+          last_payment_tx,
+          last_payment_amount,
+          timestamp,
+          ROW_NUMBER() OVER (PARTITION BY pool_name ORDER BY timestamp DESC) as rn
+        FROM pool_payments
+      )
+      SELECT * FROM RankedPayments WHERE rn = 1
+      ORDER BY last_payment_timestamp DESC
+    `;
+    
+    db.all(query, [], (err, rows) => {
+      if (err) reject(err);
+      else resolve(rows);
+    });
+  });
+}
+
+// 페이아웃 메시지 생성 함수
+function createPaymentMessage(payments) {
+  if (payments.length === 0) {
+    return '📝 페이아웃 정보가 없습니다.';
+  }
+
+  const message = ['💰 최근 페이아웃 정보:\n'];
+  
+  const currentTime = Date.now(); // 현재 로컬 시간
+
+  payments.forEach(payment => {
+    const amount = payment.last_payment_amount / 1e9; // Wei to MINTME 변환
+    const paymentTime = payment.last_payment_timestamp * 1000; // 타임스탬프 변환
+    const timeDiff = Math.floor((currentTime - paymentTime) / 1000); // 초 단위 차이
+
+    // 시간 차이를 초, 분, 시간, 일로 변환
+    const days = Math.floor(timeDiff / (24 * 3600));
+    const hours = Math.floor((timeDiff % (24 * 3600)) / 3600);
+    const minutes = Math.floor((timeDiff % 3600) / 60);
+    const seconds = timeDiff % 60;
+
+    // 휴먼 리더블 형식으로 시간 차이 생성
+    const timeDiffMessage = `${days > 0 ? `${days}일 ` : ''}${hours > 0 ? `${hours}시간 ` : ''}${minutes > 0 ? `${minutes}분 ` : ''}${seconds}초 전`;
+
+    message.push(
+      `\n🏊‍♂️ ${payment.pool_name}\n` +
+      `💵 금액: ${amount.toFixed(6)} MINTME\n` +
+      `🕒 시간: ${formatKSTDateTime(paymentTime)}\n` +
+      `🔗 TX: ${payment.last_payment_tx.substring(0, 10)}...\n` +
+      `⏳ ${timeDiffMessage}의 페이아웃입니다.` // 시간 차이 추가
+    );
+  });
+
+  return message.join('');
+}
+
+// 명령어 추가
+bot.onText(/\/payments/, async (msg) => {
+  const chatId = msg.chat.id;
+  try {
+    const payments = await getLatestPayments();
+    const message = createPaymentMessage(payments);
+    await bot.sendMessage(chatId, message);
+  } catch (error) {
+    console.error('페이아웃 정보 조회 중 오류:', error);
+    await bot.sendMessage(chatId, '❌ 페이아웃 정보 조회 중 오류가 발생했습니다.');
+  }
 });
