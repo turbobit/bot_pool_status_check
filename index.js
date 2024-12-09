@@ -121,7 +121,9 @@ async function getPoolStats() {
       let attempts = 0;
       while (attempts < 3) { // 최대 3회 재시도
         try {
-          const response = await axios.get(endpoint.url);
+          const response = await axios.get(endpoint.url, {
+            timeout: 5000 // 5초 대기 시간 설정
+          });
           return {
             name: endpoint.name,
             url: endpoint.url,
@@ -741,7 +743,9 @@ bot.onText(/\/settings/, async (msg) => {
 async function getPoolPayments(poolEndpoint, poolName) {
   try {
     const paymentsUrl = poolEndpoint.replace('/api/stats', '/api/payments');
-    const response = await axios.get(paymentsUrl);
+    const response = await axios.get(paymentsUrl, {
+      timeout: 5000 // 5초 대기 시간 설정
+    });
     const payments = response.data.payments;
     
     if (payments && payments.length > 0) {
@@ -755,7 +759,7 @@ async function getPoolPayments(poolEndpoint, poolName) {
     }
     return null;
   } catch (error) {
-    console.error(`${poolName} 페이아웃 정보 조회 중 오류:`, error);
+    console.error(`${poolName} 페이아웃 정보 조회 중 오류: ${error.message} (URL: ${paymentsUrl})`); // URL 추가
     return null;
   }
 }
