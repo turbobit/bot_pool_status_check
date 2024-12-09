@@ -133,7 +133,7 @@ async function getPoolStats() {
         } catch (error) {
           attempts++;
           if (attempts >= 3) {
-            console.error(`getPoolStats 함수에서 ${endpoint.name} API 호출 중 오류:`, error);
+            console.error(`getPoolStats 함수에서 ${endpoint.name} API 호출 중 오류: ${error.message} (URL: ${endpoint.url})`);
             throw error; // 재시도 후에도 실패하면 오류를 던짐
           }
         }
