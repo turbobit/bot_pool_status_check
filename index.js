@@ -149,7 +149,8 @@ function savePoolStats(poolStats) {
   poolStats.forEach(pool => {
     stmt.run(pool.name, pool.height, pool.hashrate, pool.miners);
   });
-  console.log(`풀 상태가 저장되었습니다. (${poolStats.length}개 풀 상태 저장됨)`);
+  const currentTime = formatKSTDateTime(Date.now());
+  console.log(`[${currentTime}] 풀 상태가 저장되었습니다. (${poolStats.length}개 풀 상태 저장됨)`);
   stmt.finalize();
 }
 
