@@ -118,15 +118,26 @@ function formatKSTDateTime(timestamp) {
 async function getPoolStats() {
   const poolStats = await Promise.all(
     poolEndpoints.map(async (endpoint) => {
-      const response = await axios.get(endpoint.url);
-      return {
-        name: endpoint.name,
-        url: endpoint.url,
-        height: parseInt(response.data.nodes[0].height),
-        hashrate: response.data.hashrate,
-        miners: response.data.minersTotal,
-        lastBlockFound: response.data.stats.lastBlockFound
-      };
+      let attempts = 0;
+      while (attempts < 3) { // 최대 3회 재시도
+        try {
+          const response = await axios.get(endpoint.url);
+          return {
+            name: endpoint.name,
+            url: endpoint.url,
+            height: parseInt(response.data.nodes[0].height),
+            hashrate: response.data.hashrate,
+            miners: response.data.minersTotal,
+            lastBlockFound: response.data.stats.lastBlockFound
+          };
+        } catch (error) {
+          attempts++;
+          if (attempts >= 3) {
+            console.error(`getPoolStats 함수에서 ${endpoint.name} API 호출 중 오류:`, error);
+            throw error; // 재시도 후에도 실패하면 오류를 던짐
+          }
+        }
+      }
     })
   );
   return poolStats;
@@ -196,7 +207,7 @@ async function checkPoolStatus() {
       }
     }
   } catch (error) {
-    console.error('풀 상태 확인 중 오류 발생:', error);
+    console.error('checkPoolStatus 함수에서 풀 상태 확인 중 오류 발생:', error);
     for (const chatId of activeChatIds) {
       await bot.sendMessage(chatId, '❌ 풀 상태 확인 중 오류가 발생했습니다.');
     }
